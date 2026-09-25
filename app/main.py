@@ -3,7 +3,7 @@ import json
 from typing import Annotated, Literal, List
 from dotenv import load_dotenv
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from tavily import TavilyClient
@@ -224,23 +224,93 @@ BASE_SYSTEM_PROMPT = (
     "6. If a calculation was performed, include the calculation details."
 )
 
+# Deterministic mapping from structured verification_status -> final evidence label.
+# This is the single source of truth for how evidence is described to the user.
+# It must never be derived from LLM wording, domain name, or source title.
+EVIDENCE_STATUS_LABELS = {
+    "unverified": "Information from Search Snippets",
+    "fetched": "Information from Fetched Page Content",
+    "audited_supported": "Auditor-verified evidence (SUPPORTED)",
+    "audited_contradicted": "Auditor-verified evidence (CONTRADICTED by the cited source)",
+    "failed": "Unverified - source could not be independently fetched or verified",
+}
+DEFAULT_EVIDENCE_LABEL = "Unverified - status unknown"
+
+def get_evidence_label(verification_status: str) -> str:
+    """Deterministically resolves a claim's verification_status to its user-facing evidence label."""
+    return EVIDENCE_STATUS_LABELS.get(verification_status, DEFAULT_EVIDENCE_LABEL)
+
 # 4. Define Graph Nodes
+def analyze_tool_history(messages: list) -> dict:
+    """Scans message history for tool calls and outputs deterministic evidence status per URL."""
+    successfully_fetched = set()
+    failed_fetched = set()
+    search_snippet_urls = set()
+
+    for msg in messages:
+        if hasattr(msg, "type") and msg.type == "tool":
+            content = str(msg.content)
+            if "[FETCH STATUS: SUCCESS]" in content:
+                for line in content.split("\n"):
+                    if line.startswith("URL:"):
+                        url = line.replace("URL:", "").strip()
+                        if url:
+                            successfully_fetched.add(url)
+            elif "[FETCH STATUS: FAILED]" in content:
+                for line in content.split("\n"):
+                    if line.startswith("URL:"):
+                        url = line.replace("URL:", "").strip()
+                        if url:
+                            failed_fetched.add(url)
+            elif "URL:" in content or "http" in content:
+                for line in content.split("\n"):
+                    if line.startswith("URL:"):
+                        url = line.replace("URL:", "").strip()
+                        if url:
+                            search_snippet_urls.add(url)
+
+    unverified_urls = (search_snippet_urls | failed_fetched) - successfully_fetched
+
+    return {
+        "successfully_fetched": list(successfully_fetched),
+        "unverified_urls": list(unverified_urls)
+    }
+
 def chatbot(state: State):
     """The main LLM node that decides whether to answer or call a tool, incorporating learned research memory lessons."""
     memory_lessons = load_memory()
+    tool_status = analyze_tool_history(state["messages"])
     
+    # Construct evidence manifest for response synthesis
+    if tool_status["successfully_fetched"] or tool_status["unverified_urls"]:
+        fetched_str = "\n".join(f"- {u}" for u in tool_status["successfully_fetched"]) if tool_status["successfully_fetched"] else "- None"
+        unverified_str = "\n".join(f"- {u}" for u in tool_status["unverified_urls"]) if tool_status["unverified_urls"] else "- None"
+        
+        manifest_section = (
+            f"\n\n### DETERMINISTIC EVIDENCE STATUS MANIFEST (STRICT COMPLIANCE REQUIRED):\n"
+            f"1. SUCCESSFULLY FETCHED URLs:\n{fetched_str}\n"
+            f"   (ONLY content from these exact URLs may be described under 'Information from Fetched Page Content'.)\n\n"
+            f"2. UNVERIFIED / FAILED FETCH URLs:\n{unverified_str}\n"
+            f"   (Content from these URLs MUST ONLY be described under 'Information from Search Snippets'. You MUST explicitly state that these source pages could not be independently fetched/verified.)\n\n"
+            f"STRICT RULES:\n"
+            f"- If a source URL is under 'UNVERIFIED / FAILED FETCH URLs', NEVER describe it under 'Information from Fetched Page Content', even if it is a primary domain (e.g. SEC.gov, EDGAR, GuruFocus, Microsoft.com).\n"
+            f"- If 'SUCCESSFULLY FETCHED URLs' is None, list '*None*' under 'Information from Fetched Page Content'."
+        )
+    else:
+        manifest_section = ""
+
     if memory_lessons:
         lessons_formatted = "\n".join(
             f"- {item['lesson']} (Reason: {item['reason']})" for item in memory_lessons
         )
         system_content = (
-            f"{BASE_SYSTEM_PROMPT}\n\n"
+            f"{BASE_SYSTEM_PROMPT}{manifest_section}\n\n"
             f"### RELEVANT LESSONS FROM PREVIOUS AUDITS:\n"
             f"Follow these guidelines derived from past audit feedback:\n"
             f"{lessons_formatted}"
         )
     else:
-        system_content = BASE_SYSTEM_PROMPT
+        system_content = f"{BASE_SYSTEM_PROMPT}{manifest_section}"
 
     messages = [SystemMessage(content=system_content)] + state["messages"]
     return {"messages": [llm_with_tools.invoke(messages)]}
@@ -382,6 +452,14 @@ def auditor(state: State):
                 claim_copy["verification_status"] = verification_status
                 updated_claims.append(claim_copy)
 
+    print("\n[VALIDATION DEBUG CHECK - EVIDENCE & AUDIT SUMMARY]:")
+    for idx, (c, a) in enumerate(zip(updated_claims, audit_results), 1):
+        print(f"  Record {idx}:")
+        print(f"    - Source URL: {c.get('source_url', 'No URL')}")
+        print(f"    - Evidence Type: {c.get('evidence_type', 'unknown')}")
+        print(f"    - Verification Status: {c.get('verification_status', 'unknown')}")
+        print(f"    - Auditor Verdict: {a.get('verdict', 'unknown').upper()}")
+
     return {"audit_results": audit_results, "claims": updated_claims}
 
 def feedback(state: State):
@@ -460,6 +538,74 @@ def feedback(state: State):
 
     return {"feedback_lessons": added}
 
+def compose_final_answer(state: State):
+    """Composes the user-facing final answer AFTER the Auditor and Feedback have run.
+
+    Evidence labels are resolved strictly from structured state (claims[].verification_status,
+    cross-referenced with audit_results for verdict/reasoning). The LLM is not used to decide
+    or invent evidence labels - it only sees the already-resolved labels as fixed facts, so the
+    pre-audit chatbot draft is never treated as the final answer.
+    """
+    claims = state.get("claims", [])
+    audit_results = state.get("audit_results", [])
+
+    # Index audit results by (original_claim, source_url) so each URL keeps its own,
+    # independent status instead of being merged with other URLs for the same claim.
+    audit_lookup = {}
+    for audit in audit_results:
+        key = (audit.get("original_claim", ""), audit.get("source_url", ""))
+        audit_lookup[key] = audit
+
+    print("\n[FINAL ANSWER DEBUG - PER-CLAIM EVIDENCE LABELS]:")
+
+    sections = []
+    for idx, claim in enumerate(claims, 1):
+        original_claim = claim.get("original_claim", "")
+        source_url = claim.get("source_url", "") or "N/A"
+        evidence_type = claim.get("evidence_type", "unknown")
+        verification_status = claim.get("verification_status", "unknown")
+
+        audit = audit_lookup.get((claim.get("original_claim", ""), claim.get("source_url", "")))
+        auditor_verdict = audit.get("verdict") if audit else None
+        auditor_reasoning = audit.get("reasoning") if audit else None
+        supporting_evidence = (audit.get("supporting_evidence") if audit else None) or claim.get("evidence", "")
+
+        # Deterministic label resolution - NOT decided by the LLM.
+        evidence_label = get_evidence_label(verification_status)
+
+        print(f"  Claim {idx}:")
+        print(f"    - original_claim: {original_claim}")
+        print(f"    - source_url: {source_url}")
+        print(f"    - evidence_type: {evidence_type}")
+        print(f"    - verification_status: {verification_status}")
+        print(f"    - auditor_verdict: {auditor_verdict}")
+        print(f"    - final_evidence_label: {evidence_label}")
+
+        lines = [
+            f"**Claim {idx}:** {original_claim}",
+            f"- Source URL: {source_url}",
+            f"- Evidence status: **{evidence_label}**",
+        ]
+        if auditor_verdict:
+            lines.append(f"- Auditor verdict: {auditor_verdict.upper()}")
+        if auditor_reasoning:
+            lines.append(f"- Auditor reasoning: {auditor_reasoning}")
+        if supporting_evidence:
+            lines.append(f"- Evidence excerpt: {supporting_evidence}")
+
+        sections.append("\n".join(lines))
+
+    if sections:
+        final_text = "## Final Verified Answer\n\n" + "\n\n".join(sections)
+    else:
+        final_text = (
+            "## Final Verified Answer\n\n"
+            "No structured factual claims requiring evidence verification were extracted "
+            "from this research session."
+        )
+
+    return {"messages": [AIMessage(content=final_text)]}
+
 def route_after_chatbot(state: State):
     """Routes to tools node if tool call exists; otherwise routes to extract_claims node."""
     route = tools_condition(state)
@@ -477,6 +623,7 @@ graph_builder.add_node("tools", tool_node)
 graph_builder.add_node("extract_claims", extract_claims)
 graph_builder.add_node("auditor", auditor)
 graph_builder.add_node("feedback", feedback)
+graph_builder.add_node("compose_final_answer", compose_final_answer)
 
 # Define edges
 graph_builder.add_edge(START, "chatbot")
@@ -489,7 +636,8 @@ graph_builder.add_conditional_edges(
 graph_builder.add_edge("tools", "chatbot")
 graph_builder.add_edge("extract_claims", "auditor")
 graph_builder.add_edge("auditor", "feedback")
-graph_builder.add_edge("feedback", END)
+graph_builder.add_edge("feedback", "compose_final_answer")
+graph_builder.add_edge("compose_final_answer", END)
 
 # Compile graph
 agent = graph_builder.compile()
@@ -510,17 +658,24 @@ if __name__ == "__main__":
             
             for event in events:
                 message = event["messages"][-1]
-                
-                # Print the AI's direct responses
+
+                # Print tool-call activity for transparency. The chatbot's pre-audit
+                # draft content is intentionally NOT printed here - it has not yet been
+                # verified by the Auditor, so it must not be shown as the answer.
+                # The verified final answer is printed after the graph finishes running,
+                # from the compose_final_answer node's output.
                 if message.type == "ai":
-                    if message.content:
-                        print(f"Agent: {message.content}")
                     if message.tool_calls:
                         print(f"[Agent calling tool: {message.tool_calls[0]['name']}]")
                 # Print the Tool's output
                 elif message.type == "tool":
                     print(f"[Tool Result: {message.content}]")
-            
+
+            # Print the verified final answer, composed after the Auditor and Feedback
+            # have run (compose_final_answer is the last node before END).
+            if event and event.get("messages") and event["messages"][-1].type == "ai":
+                print(f"\nAgent (Verified Final Answer):\n{event['messages'][-1].content}\n")
+
             # Print extracted claims stored in graph state if present
             if "claims" in event and event["claims"]:
                 print("\n[Structured Claims & Evidence in State]:")
