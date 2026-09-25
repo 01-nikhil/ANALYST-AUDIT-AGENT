@@ -1,0 +1,37 @@
+[
+  {
+    "lesson": "Prefer sources that can be independently fetched.",
+    "reason": "The source URL failed to return content with a 400 Client Error, making verification impossible.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Avoid relying exclusively on search snippets when full independent page fetches fail.",
+    "reason": "The analyst relied on a search snippet while the source URL fetch failed with an HTTP 400 error, leading to an unsupported claim.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Verify specific ownership percentages and financial metrics against accessible primary sources before stating exact figures.",
+    "reason": "The claim regarding a specific ownership percentage could not be independently verified because the source page was inaccessible.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Ensure alternative accessible URLs or cached versions are used when SEC EDGAR or primary source document fetches result in 403 Forbidden errors.",
+    "reason": "The direct PDF fetch failed due to an HTTP 403 error, preventing complete verification of the original claim.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Implement fallback mechanisms or seek alternative mirrored filings when encountering 403 Forbidden errors on SEC EDGAR documents.",
+    "reason": "The direct fetch of the SEC EDGAR filing failed with a 403 Forbidden HTTP error, preventing independent verification of the claims.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Handle 403 Forbidden errors from SEC EDGAR by utilizing alternative proxy access or parsing secondary regulatory reports.",
+    "reason": "The direct fetch of the SEC EDGAR filing failed with a 403 Forbidden HTTP error, preventing verification.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Avoid utilizing URLs that return 403 Forbidden errors for financial data retrieval and seek open financial databases.",
+    "reason": "The independent page fetch for the Gurufocus URL failed with a 403 Forbidden error, preventing direct verification of Satya Nadella's ownership percentage.",
+    "source_of_feedback": "auditor"
+  }
+]

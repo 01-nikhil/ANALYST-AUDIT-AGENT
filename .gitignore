@@ -1,0 +1,13 @@
+# Secrets
+.env
+
+# Python Virtual Environment
+.venv/
+
+# LangGraph Local API state & Configurations
+.langgraph_api/
+langgraph.json
+
+# Cache and Memory stores
+**/__pycache__/
+app/research_memory.json

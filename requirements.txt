@@ -1,0 +1,8 @@
+langchain-core
+langchain-google-genai
+langgraph
+python-dotenv
+tavily-python
+beautifulsoup4
+requests
+langgraph-cli[inmem]
