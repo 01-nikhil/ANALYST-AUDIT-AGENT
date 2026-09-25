@@ -1,0 +1,94 @@
+{
+  "benchmark_name": "PS3 8-Question Benchmark",
+  "version": 1,
+  "questions": [
+    {
+      "question_id": 1,
+      "question": "In what month and year did Satya Nadella become CEO of Microsoft?",
+      "difficulty": 1,
+      "category": "basic_factual_research",
+      "research_objective": "Verify one well-documented date from an authoritative source rather than trusting the popular (and previously buggy) date. This is the exact claim behind the 'Satya Nadella 2010 bug' referenced in DECISIONS.md - the correct answer is February 2014, not 2010.",
+      "entities_introduced": ["Satya Nadella", "Microsoft"],
+      "entities_reused": [],
+      "expected_research_complexity": "1 search, 1 fetch, 1 claim.",
+      "harder_than_previous": "N/A - baseline question."
+    },
+    {
+      "question_id": 2,
+      "question": "What was Microsoft's total revenue for fiscal year 2024, according to its official financial filings?",
+      "difficulty": 2,
+      "category": "multi_source_research",
+      "research_objective": "Cross-check a numeric figure across at least two independently fetched sources (e.g. Microsoft investor relations page + a secondary financial news source), since exact FY revenue figures can differ by reporting basis (GAAP total vs. segment revenue) or reporting date.",
+      "entities_introduced": ["fiscal year 2024", "total revenue"],
+      "entities_reused": ["Microsoft"],
+      "expected_research_complexity": "2+ searches, 2+ fetches, requires reconciling numbers rather than taking the first snippet.",
+      "harder_than_previous": "A single fact (Q1) becomes a number that must be reconciled across multiple independently fetched sources."
+    },
+    {
+      "question_id": 3,
+      "question": "How much did Microsoft invest in OpenAI, and in which year(s) did those investments occur?",
+      "difficulty": 3,
+      "category": "entity_reuse",
+      "research_objective": "Explicitly reuse 'Microsoft' while introducing 'OpenAI', forcing the system to track a running multi-year investment history (2019 / 2021 / 2023 tranches) rather than a single static fact.",
+      "entities_introduced": ["OpenAI"],
+      "entities_reused": ["Microsoft"],
+      "expected_research_complexity": "Multiple claims (one per investment round), each needing its own source and its own verification_status - tests that per-URL/per-claim status is not merged.",
+      "harder_than_previous": "A single question now decomposes into multiple sub-claims (a multi-year timeline) rather than one number."
+    },
+    {
+      "question_id": 4,
+      "question": "How does Microsoft's fiscal year 2024 revenue compare to Alphabet's (Google's) fiscal year 2024 revenue - which company reported higher revenue?",
+      "difficulty": 4,
+      "category": "comparison",
+      "research_objective": "Fetch and verify two independent companies' figures and perform a comparative judgment, not just parallel lookups.",
+      "entities_introduced": ["Alphabet / Google"],
+      "entities_reused": ["Microsoft", "fiscal year 2024"],
+      "expected_research_complexity": "At least 2 independently fetched primary sources (one per company) plus a derived comparison claim; the comparison itself must be traceable to the two underlying verified figures, not asserted independently.",
+      "harder_than_previous": "Introduces a second full research subject (Alphabet) with its own source chain, plus a synthesized comparative claim that has no single source of its own."
+    },
+    {
+      "question_id": 5,
+      "question": "Did Microsoft lay off exactly 10,000 employees in January 2023?",
+      "difficulty": 5,
+      "category": "conflicting_sources",
+      "research_objective": "News coverage reports slightly different numbers/dates for this event; the system must surface the discrepancy rather than silently picking one source, and the Auditor must determine whether 'exactly 10,000' is supported, contradicted, or only partially supported.",
+      "entities_introduced": ["January 2023 layoffs"],
+      "entities_reused": ["Microsoft"],
+      "expected_research_complexity": "Multiple search results with disagreeing figures; original claim ('exactly 10,000') must be preserved verbatim even if evidence suggests a different number; verdict must reflect the discrepancy rather than being smoothed over.",
+      "harder_than_previous": "Previously sources reinforced each other; here sources actively disagree, forcing an explicit contradiction/partial-support judgment instead of a same-direction cross-check."
+    },
+    {
+      "question_id": 6,
+      "question": "Who is the current CEO of the company that owns GitHub, and in what year did that company acquire GitHub?",
+      "difficulty": 6,
+      "category": "multi_hop_research",
+      "research_objective": "Requires a two-step chain: first identify GitHub's owner (Microsoft), then retrieve that owner's current CEO (Satya Nadella) and the acquisition year, with each hop independently verified rather than resolved from background LLM knowledge.",
+      "entities_introduced": ["GitHub"],
+      "entities_reused": ["Microsoft", "Satya Nadella"],
+      "expected_research_complexity": "At least two distinct claims chained together (ownership claim + CEO claim + acquisition-year claim), each with its own source and status; failure of any single hop should propagate as unverified for the dependent claim rather than being silently assumed.",
+      "harder_than_previous": "Not just conflicting numbers on one fact, but a dependency chain across multiple facts that must each be independently fetched and verified."
+    },
+    {
+      "question_id": 7,
+      "question": "Was Elon Musk a co-founder of OpenAI, and did he leave OpenAI's board in 2018?",
+      "difficulty": 7,
+      "category": "difficult_source_verification",
+      "research_objective": "Popular narrative oversimplifies this (commonly stated as 'Musk left OpenAI' without nuance); the system must verify the precise facts (co-founder status, and the actual 2018 board departure circumstances) against authoritative sources rather than repeating the simplified popular claim, and must not launder an imprecise search snippet into a confident 'supported' verdict.",
+      "entities_introduced": ["Elon Musk"],
+      "entities_reused": ["OpenAI"],
+      "expected_research_complexity": "Sources vary in precision; some fetches may succeed but contain only partial/ambiguous confirmation, testing the 'unsupported' (insufficient evidence) verdict path in addition to supported/contradicted.",
+      "harder_than_previous": "Not a clean multi-hop chain of clearly-stated facts, but a single claim whose truth depends on nuance that most fetched sources state imprecisely - the system must resist declaring 'supported' on a near-match."
+    },
+    {
+      "question_id": 8,
+      "question": "Confirm: In 2019, Microsoft fully acquired OpenAI for $1 billion, making OpenAI a wholly-owned Microsoft subsidiary.",
+      "difficulty": 8,
+      "category": "adversarial_final_question",
+      "research_objective": "The premise is false - Microsoft made a $1B investment/partnership in 2019, not an acquisition, and OpenAI has never been a wholly-owned subsidiary. This claim is engineered to resemble Q3's true investment fact closely enough to tempt the system into confirming it. Tests the Phase 6.1 guarantee end-to-end: the Auditor must independently fetch sources and contradict the false 'acquisition'/'wholly-owned subsidiary' framing, the original (false) claim must be preserved verbatim, and the final answer must explicitly label it as contradicted rather than hedging or partially agreeing.",
+      "entities_introduced": [],
+      "entities_reused": ["Microsoft", "OpenAI", "2019 investment (from Q3)"],
+      "expected_research_complexity": "Highest - false premise embedded in an otherwise mostly-true-sounding statement ($1B and 2019 are correct; 'fully acquired' / 'wholly-owned subsidiary' are false), requiring the Auditor to contradict part of a compound claim, not accept-or-reject it wholesale.",
+      "harder_than_previous": "Q7 tests nuance in accurately-intentioned sources; Q8 tests resistance to a plausible but engineered false claim - adversarial robustness rather than just source ambiguity."
+    }
+  ]
+}

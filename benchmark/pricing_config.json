@@ -1,0 +1,15 @@
+{
+  "_comment": "Pricing values are intentionally left null. Do not invent numbers here. Fill these in from actual billing/pricing pages before cost figures in benchmark results can be trusted. Until then, run_benchmark.py records raw token/search counts and reports cost fields as null with an 'unavailable' note.",
+
+  "model": "gemini-3.5-flash-lite",
+  "GEMINI_INPUT_COST_PER_1K_TOKENS_INR": null,
+  "GEMINI_OUTPUT_COST_PER_1K_TOKENS_INR": null,
+
+  "search_provider": "tavily",
+  "TAVILY_COST_PER_SEARCH_INR": null,
+
+  "USD_TO_INR_RATE": null,
+
+  "pricing_last_verified": null,
+  "pricing_source_url": null
+}

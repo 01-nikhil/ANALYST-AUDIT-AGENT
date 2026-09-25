@@ -1,0 +1,31 @@
+{
+  "run_timestamp_utc": "20260925T185155Z",
+  "results": [
+    {
+      "question_id": 1,
+      "question": "In what month and year did Satya Nadella become CEO of Microsoft?",
+      "difficulty": 1,
+      "timestamp": "2026-09-25T18:51:55.146412+00:00",
+      "elapsed_seconds": 36.848,
+      "input_tokens": 10513,
+      "output_tokens": 546,
+      "total_tokens": 11059,
+      "llm_cost_inr": null,
+      "search_cost_inr": null,
+      "total_cost_inr": null,
+      "cost_status": "unavailable - pricing_config.json has no pricing values yet",
+      "num_searches": 1,
+      "num_page_fetches": 0,
+      "successful_fetches": 0,
+      "failed_fetches": 0,
+      "num_claims": 1,
+      "supported_claims": 1,
+      "contradicted_claims": 0,
+      "unsupported_claims": 0,
+      "lessons_generated": 1,
+      "new_lessons_added_to_memory": 1,
+      "memory_lessons_available_at_start": 7,
+      "final_answer_excerpt": "## Final Verified Answer\n\n**Claim 1:** In what month and year did Satya Nadella become CEO of Microsoft?\n- Source URL: https://news.microsoft.com/source/2014/02/04/microsoft-board-names-satya-nadella-as-ceo\n- Evidence status: **Auditor-verified evidence (SUPPORTED)**\n- Auditor verdict: SUPPORTED\n- Auditor reasoning: The fetched source page explicitly states that Satya Nadella was appointed as Chief Executive Officer of Microsoft on February 4, 2014, directly answering the user's question regardi"
+    }
+  ]
+}

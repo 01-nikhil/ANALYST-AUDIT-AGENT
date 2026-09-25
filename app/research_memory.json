@@ -33,5 +33,110 @@
     "lesson": "Avoid utilizing URLs that return 403 Forbidden errors for financial data retrieval and seek open financial databases.",
     "reason": "The independent page fetch for the Gurufocus URL failed with a 403 Forbidden error, preventing direct verification of Satya Nadella's ownership percentage.",
     "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to verify exact dates and appointments rather than relying solely on search snippets.",
+    "reason": "The analyst successfully answered the query using a search snippet, but direct page fetches should be prioritized for comprehensive verification of factual assertions.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full primary financial report page instead of relying solely on search snippets when citing exact fiscal year revenue figures.",
+    "reason": "The analyst relied on a search snippet rather than fetching the full annual report page to verify the precise financial metric.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to capture comprehensive multi-year investment timelines rather than relying on search snippets that only confirm partial amounts.",
+    "reason": "The analyst relied on a search snippet that confirmed the total investment amount ($13 billion) but failed to comprehensively retrieve the specific investment years, which were available in the analyst's extended evidence.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Verify revenue figures by querying accessible financial databases or company investor relations pages when primary filing URLs return 403 Forbidden errors.",
+    "reason": "The audit failed due to a 403 Forbidden error on the SEC filing URL, preventing independent verification of Alphabet's revenue.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Always fetch the primary corporate blog post or press release to verify exact employment reduction figures rather than relying solely on search snippets.",
+    "reason": "The analyst relied on a search snippet for the Microsoft layoff claim even though the source was directly accessible for a full page fetch.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Ensure URLs are verified and active before citing them to prevent HTTP 404 Not Found errors during independent page fetches.",
+    "reason": "The independent page fetch failed with a 404 Client Error for the Yahoo Finance URL, preventing verification of the claim.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Verify corporate acquisition and ownership structure claims against primary news and regulatory filings to avoid mischaracterizing strategic partnerships as full buyouts.",
+    "reason": "The analyst claimed Microsoft fully acquired OpenAI as a wholly-owned subsidiary, which was contradicted by sources showing it is merely a partnership with minority influence.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Avoid utilizing SEC EDGAR direct URLs that frequently trigger 403 Forbidden errors, and instead query accessible investor relations portals or open financial aggregators for verified fiscal year revenue data.",
+    "reason": "The independent page fetch failed with a 403 Forbidden error on the SEC EDGAR URL, preventing verification of the financial metrics.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to verify subsidiary leadership and corporate structure details rather than relying solely on search snippets that lack complete executive context.",
+    "reason": "The analyst used a search snippet instead of fetching the full page, which resulted in missing the explicit naming of the parent company CEO within the visible text excerpt.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to verify specific historical event dates such as board departures rather than relying on search snippets that only confirm partial timelines.",
+    "reason": "The analyst relied on a search snippet that confirmed Elon Musk co-founded OpenAI but lacked the explicit 2018 date for his board departure, requiring full page verification for precise temporal claims.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Carefully distinguish between strategic minority investments and full corporate acquisitions by verifying transaction details directly in primary corporate announcements rather than relying on generalized snippets.",
+    "reason": "The analyst incorrectly characterized a $1 billion partnership investment by Microsoft into OpenAI as a full acquisition and subsidiary conversion.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Ensure all comparative entities in a claim are individually retrieved and verified from accessible sources rather than assuming complete comparative coverage within a single corporate report.",
+    "reason": "The analyst attempted a comparative revenue claim between Microsoft and Alphabet, but relied on a Microsoft report that lacked Alphabet data and encountered a 403 Forbidden error on the Alphabet revenue source URL.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Always fetch the full corporate blog post or press release to verify exact employment reduction figures rather than relying solely on search snippets.",
+    "reason": "The analyst relied on a search snippet (evidence_type: search_snippet) instead of performing a full independent page fetch to confirm the layoff figures.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to verify parent company executive leadership details and subsidiary acquisition timelines rather than relying solely on search snippets that lack complete corporate context.",
+    "reason": "The analyst relied on a search snippet which only indirectly mentioned the parent company CEO, requiring careful inspection of the text to confirm details.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Ensure corporate acquisition claims are thoroughly verified against accessible primary news or regulatory releases to avoid mischaracterizing minority investments as full buyouts, especially when primary URLs trigger HTTP access errors.",
+    "reason": "The analyst claimed Microsoft fully acquired OpenAI in 2019 based on an inaccessible URL that returned an HTTP 401 error, leading to an unsupported verdict and a mischaracterization of a strategic partnership as a subsidiary acquisition.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to verify exact historical dates and corporate appointments rather than relying solely on search snippets.",
+    "reason": "The analyst successfully verified the appointment date of the CEO using a search snippet, but fetching the full source page ensures complete contextual accuracy for historical timelines.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full source page to capture comprehensive multi-year investment timelines and specific funding dates rather than relying on search snippets that only confirm partial amounts.",
+    "reason": "The analyst relied on search snippets which provided the total investment amount but lacked the exact historical years of the individual funding rounds.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Avoid utilizing direct SEC EDGAR document links that return 403 Forbidden errors and instead query verified corporate investor relations websites for accessible financial statements.",
+    "reason": "Direct SEC EDGAR fetches failed with HTTP 403 Forbidden errors, preventing independent verification of fiscal year revenue figures.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Always fetch the full source page to verify exact employment reduction figures and executive statements rather than relying solely on search snippets.",
+    "reason": "The analyst relied on a search snippet instead of fetching the full source page to verify the Microsoft layoff claims, triggering trigger criterion 4.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Fetch the full parent company page as well as the subsidiary page to ensure both executive leadership and corporate ownership structure claims are fully verified rather than relying on snippets that cover only one entity.",
+    "reason": "The analyst attempted to answer a multi-part question about both the parent company CEO and the subsidiary acquisition details using a snippet that only covered the subsidiary, leaving the parent company CEO unverified.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "Ensure corporate partnership URLs are accessible and not restricted by HTTP 401 or 403 errors before relying on them to verify equity investment claims.",
+    "reason": "The independent page fetch failed due to a 401 Client Error, leaving the investment and acquisition claims unverified.",
+    "source_of_feedback": "auditor"
   }
 ]

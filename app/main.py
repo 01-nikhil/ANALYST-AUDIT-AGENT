@@ -190,6 +190,11 @@ class AuditRecord(BaseModel):
         description="Direct text snippet/excerpt quote extracted from the independently fetched source page, or explanation if unavailable"
     )
 
+class FallbackSearchQuery(BaseModel):
+    query: str = Field(
+        description="A neutral, entity-and-fact-focused web search query about the SUBJECT of the claim, used only when the Analyst's cited source could not be fetched. Must NOT assume the claim is true or false."
+    )
+
 class ResearchLesson(BaseModel):
     lesson: str = Field(description="Concise, actionable rule/directive to improve future research")
     reason: str = Field(description="Explanation of why this lesson was derived from the audit results")
@@ -337,25 +342,162 @@ def extract_claims(state: State):
         extracted = []
     return {"claims": extracted}
 
+def _map_verdict_to_status(verdict: str) -> str:
+    """Maps an auditor verdict to the persistent verification_status. Unchanged semantics:
+    supported -> audited_supported, contradicted -> audited_contradicted, else failed."""
+    if verdict == "supported":
+        return "audited_supported"
+    if verdict == "contradicted":
+        return "audited_contradicted"
+    return "failed"
+
+def _extract_urls_from_search(search_output: str, exclude_url: str = None) -> list:
+    """Parses web_search()'s formatted output ('URL: <url>' lines) into an ordered,
+    de-duplicated list of candidate URLs, skipping the already-failed cited URL."""
+    urls = []
+    for line in str(search_output).split("\n"):
+        line = line.strip()
+        if line.startswith("URL:"):
+            u = line[len("URL:"):].strip()
+            if u and u != "No URL" and u != exclude_url and u not in urls:
+                urls.append(u)
+    return urls
+
+def _build_fallback_query(original_claim: str) -> str:
+    """Generates a NEUTRAL, claim-oriented fallback search query about the factual
+    subject of the claim. It must not assume the claim is true or false and must not
+    append judgemental terms. Falls back to the raw original claim text if the LLM
+    call fails or produces a non-neutral query."""
+    prompt = (
+        "The Analyst's cited source for the following claim could not be fetched.\n"
+        "Generate ONE neutral web search query to find INDEPENDENT evidence about the\n"
+        "FACTUAL SUBJECT of the claim (its entities, numbers, and dates).\n\n"
+        f"ORIGINAL CLAIM:\n\"{original_claim}\"\n\n"
+        "STRICT RULES:\n"
+        "- The query MUST be neutral about whether the claim is true or false.\n"
+        "- Include the key entities, numbers, and dates from the claim.\n"
+        "- Do NOT append judgemental terms such as 'true', 'false', 'debunked', 'hoax',\n"
+        "  'confirmed', 'fake', or 'myth'.\n"
+        "- Do NOT phrase the query to seek confirmation or refutation of the claim;\n"
+        "  seek the underlying facts so the evidence can independently support OR contradict it."
+    )
+    banned = ("true", "false", "debunk", "hoax", "confirmed", "fake", "myth")
+    try:
+        structured_query = llm.with_structured_output(FallbackSearchQuery)
+        res = structured_query.invoke([HumanMessage(content=prompt)])
+        q = (res.query or "").strip().strip('"').strip() if res else ""
+        if not q or any(b in q.lower() for b in banned):
+            return original_claim
+        return q
+    except Exception:
+        return original_claim
+
+def _audit_fetched_evidence(original_claim: str, evidence_url: str, fetched_data: str, is_fallback: bool):
+    """Runs the zero-trust audit LLM against successfully-fetched page content and returns
+    (verdict, verification_status, reasoning, supporting_evidence).
+
+    When is_fallback is True the prompt additionally guards requirement #6: an alternative
+    page that is unrelated to / silent on the claim must yield 'unsupported', NOT
+    'contradicted'. The original-source path is behaviourally identical to before."""
+    structured_auditor = llm.with_structured_output(AuditRecord)
+    if is_fallback:
+        audit_prompt = (
+            f"You are an independent Auditor performing zero-trust verification of an ORIGINAL user claim.\n\n"
+            f"The Analyst's ORIGINALLY CITED source could not be fetched. You performed an INDEPENDENT "
+            f"fallback web search for evidence about the factual subject of the claim, and fetched an "
+            f"ALTERNATIVE source page shown below.\n\n"
+            f"ORIGINAL CLAIM TO EVALUATE:\n\"{original_claim}\"\n\n"
+            f"ALTERNATIVE (FALLBACK) SOURCE URL:\n{evidence_url}\n\n"
+            f"INDEPENDENTLY FETCHED FALLBACK PAGE CONTENT:\n{fetched_data[:8000]}\n\n"
+            f"STRICT RULES:\n"
+            f"1. Base your verdict EXCLUSIVELY on the INDEPENDENTLY FETCHED FALLBACK PAGE CONTENT above.\n"
+            f"2. Do NOT evaluate based on search snippets, memory, or external assumptions.\n"
+            f"3. Assign verdict='supported' ONLY if the fallback page content explicitly and directly verifies the original claim.\n"
+            f"4. Assign verdict='contradicted' ONLY if the fallback page content directly and SUBSTANTIVELY refutes the original claim.\n"
+            f"5. Assign verdict='unsupported' if the fallback page does not substantively address the original claim, is about a "
+            f"different topic/entity, or lacks sufficient facts to verify or disprove it. Do NOT assign 'contradicted' merely "
+            f"because the page is unrelated to or silent on the claim.\n"
+            f"6. Do NOT invent or fabricate evidence. In supporting_evidence, extract direct quote excerpts from the fallback page content.\n"
+            f"7. Do NOT rewrite or reinterpret the original claim."
+        )
+    else:
+        audit_prompt = (
+            f"You are an independent Auditor performing zero-trust verification of an ORIGINAL user claim.\n\n"
+            f"ORIGINAL CLAIM TO EVALUATE:\n\"{original_claim}\"\n\n"
+            f"CITED SOURCE URL:\n{evidence_url}\n\n"
+            f"INDEPENDENTLY FETCHED SOURCE PAGE CONTENT:\n{fetched_data[:8000]}\n\n"
+            f"STRICT RULES:\n"
+            f"1. Base your verdict EXCLUSIVELY on the INDEPENDENTLY FETCHED SOURCE PAGE CONTENT provided above.\n"
+            f"2. Do NOT evaluate based on search snippets, memory, or external assumptions.\n"
+            f"3. Assign verdict='supported' ONLY if the fetched page content explicitly and directly verifies the original claim.\n"
+            f"4. Assign verdict='contradicted' if the fetched page content directly refutes or contradicts the original claim (e.g. claim states 2010 but fetched page states 2014).\n"
+            f"5. Assign verdict='unsupported' if the fetched page content does not contain sufficient facts to verify or disprove the original claim.\n"
+            f"6. Do NOT invent or fabricate evidence. In supporting_evidence, extract direct quote excerpts directly from the fetched page content."
+        )
+    try:
+        res = structured_auditor.invoke([HumanMessage(content=audit_prompt)])
+        if res:
+            verdict = res.verdict
+            return verdict, _map_verdict_to_status(verdict), res.reasoning, res.supporting_evidence
+        return "unsupported", "failed", "Auditor model returned empty evaluation response.", "None"
+    except Exception as e:
+        return "unsupported", "failed", f"Auditor evaluation error: {str(e)}", "None"
+
+def _assemble_audit_record(original_claim, source_url, evidence_type, verification_status,
+                           verdict, reasoning, supporting_evidence, provenance):
+    """Builds one audit_results record. Preserves all existing benchmark-consumed fields
+    (original_claim, source_url, evidence_type, verification_status, verdict, reasoning,
+    supporting_evidence) and appends the fallback-provenance fields. `source_url` is always
+    the ORIGINAL cited URL (so compose_final_answer's per-claim join by (original_claim,
+    source_url) keeps working); the fallback URL lives in provenance['fallback_source_url']."""
+    record = {
+        "original_claim": original_claim,
+        "source_url": source_url,
+        "evidence_type": evidence_type,
+        "verification_status": verification_status,
+        "verdict": verdict,
+        "reasoning": reasoning,
+        "supporting_evidence": supporting_evidence,
+    }
+    record.update(provenance)
+    record["final_verdict"] = verdict
+    return record
+
 def auditor(state: State):
-    """Independently evaluates each extracted Analyst claim by re-inspecting cited sources."""
+    """Independently evaluates each extracted Analyst claim by re-inspecting cited sources.
+
+    Robustness upgrade: if the Analyst's cited URL cannot be fetched, the Auditor performs
+    ONE independent, neutral fallback web search about the original claim's subject, selects
+    the top alternative accessible result, fetches it, and verifies against that fallback
+    evidence. If the fallback fetch also fails (or no candidate is found), the verdict is
+    UNSUPPORTED exactly as before. Successful cited-source fetches keep the prior behaviour
+    unchanged (no fallback search is performed)."""
     claims = state.get("claims", [])
     if not claims:
         return {"audit_results": [], "claims": []}
 
     audit_results = []
     updated_claims = []
-    structured_auditor = llm.with_structured_output(AuditRecord)
 
     for claim in claims:
         claim_copy = dict(claim)
         original_claim = claim_copy.get("original_claim", "")
         source_url = claim_copy.get("source_url", "")
         evidence_type = claim_copy.get("evidence_type", "search_snippet")
-        
+
+        provenance = {
+            "original_source_url": source_url,
+            "original_fetch_status": None,
+            "fallback_search_performed": False,
+            "fallback_search_query": None,
+            "fallback_source_url": None,
+            "fallback_fetch_status": None,
+            "final_evidence_source": "none",
+        }
+
         print(f"\nAUDITOR -> fetching {source_url if source_url else '<No URL>'}")
-        
-        # Independently fetch the cited source page
+
+        # 1. Try the Analyst's cited source page first.
         if source_url and source_url != "No URL":
             try:
                 fetched_data = fetch_page.invoke({"url": source_url})
@@ -364,93 +506,80 @@ def auditor(state: State):
         else:
             fetched_data = "[FETCH STATUS: FAILED]\nURL: None\nREASON: No source URL provided by Analyst."
 
-        if fetched_data.startswith("[FETCH STATUS: FAILED]"):
-            verdict = "unsupported"
-            verification_status = "failed"
-            reasoning = f"Independent page fetch failed for URL '{source_url}'. The original claim cannot be verified without accessible source page content."
-            supporting_evidence = fetched_data
-
-            print(f"AUDITOR -> fetch failed: {source_url if source_url else '<No URL>'}")
-            print(f"AUDITOR -> verdict: UNSUPPORTED | evidence_type: {evidence_type} | verification_status: {verification_status}")
-            
-            record = {
-                "original_claim": original_claim,
-                "source_url": source_url,
-                "evidence_type": evidence_type,
-                "verification_status": verification_status,
-                "verdict": verdict,
-                "reasoning": reasoning,
-                "supporting_evidence": supporting_evidence
-            }
-            audit_results.append(record)
-            claim_copy["verification_status"] = verification_status
-            updated_claims.append(claim_copy)
-        else:
+        if fetched_data.startswith("[FETCH STATUS: SUCCESS]"):
+            # 2. Cited-source fetch SUCCEEDED -> preserve existing behaviour exactly (no fallback).
+            provenance["original_fetch_status"] = "success"
+            provenance["final_evidence_source"] = "original_cited_source"
             print(f"AUDITOR -> fetch succeeded: {source_url}")
-            audit_prompt = (
-                f"You are an independent Auditor performing zero-trust verification of an ORIGINAL user claim.\n\n"
-                f"ORIGINAL CLAIM TO EVALUATE:\n\"{original_claim}\"\n\n"
-                f"CITED SOURCE URL:\n{source_url}\n\n"
-                f"INDEPENDENTLY FETCHED SOURCE PAGE CONTENT:\n{fetched_data[:8000]}\n\n"
-                f"STRICT RULES:\n"
-                f"1. Base your verdict EXCLUSIVELY on the INDEPENDENTLY FETCHED SOURCE PAGE CONTENT provided above.\n"
-                f"2. Do NOT evaluate based on search snippets, memory, or external assumptions.\n"
-                f"3. Assign verdict='supported' ONLY if the fetched page content explicitly and directly verifies the original claim.\n"
-                f"4. Assign verdict='contradicted' if the fetched page content directly refutes or contradicts the original claim (e.g. claim states 2010 but fetched page states 2014).\n"
-                f"5. Assign verdict='unsupported' if the fetched page content does not contain sufficient facts to verify or disprove the original claim.\n"
-                f"6. Do NOT invent or fabricate evidence. In supporting_evidence, extract direct quote excerpts directly from the fetched page content."
-            )
+            verdict, verification_status, reasoning, supporting_evidence = _audit_fetched_evidence(
+                original_claim, source_url, fetched_data, is_fallback=False)
+            print(f"AUDITOR -> verdict: {verdict.upper()} | evidence_type: {evidence_type} | verification_status: {verification_status}")
+            record = _assemble_audit_record(original_claim, source_url, evidence_type, verification_status,
+                                            verdict, reasoning, supporting_evidence, provenance)
+        else:
+            # 3. Cited-source fetch FAILED -> record failure, perform ONE independent fallback.
+            provenance["original_fetch_status"] = "failed"
+            original_failure_marker = fetched_data
+            print(f"AUDITOR -> cited-source fetch failed: {source_url if source_url else '<No URL>'}")
+
+            fallback_query = _build_fallback_query(original_claim)
+            provenance["fallback_search_performed"] = True
+            provenance["fallback_search_query"] = fallback_query
+            print(f"AUDITOR -> fallback search: {fallback_query!r}")
+
             try:
-                res = structured_auditor.invoke([HumanMessage(content=audit_prompt)])
-                if res:
-                    verdict = res.verdict
-                    if verdict == "supported":
-                        verification_status = "audited_supported"
-                    elif verdict == "contradicted":
-                        verification_status = "audited_contradicted"
-                    else:
-                        verification_status = "failed"
-                    
-                    print(f"AUDITOR -> verdict: {verdict.upper()} | evidence_type: {evidence_type} | verification_status: {verification_status}")
-                    
-                    record = res.model_dump()
-                    record["evidence_type"] = evidence_type
-                    record["verification_status"] = verification_status
-                    audit_results.append(record)
-                    claim_copy["verification_status"] = verification_status
-                    updated_claims.append(claim_copy)
-                else:
-                    verdict = "unsupported"
-                    verification_status = "failed"
-                    print(f"AUDITOR -> verdict: UNSUPPORTED (Empty Response) | evidence_type: {evidence_type} | verification_status: {verification_status}")
-                    record = {
-                        "original_claim": original_claim,
-                        "source_url": source_url,
-                        "evidence_type": evidence_type,
-                        "verification_status": verification_status,
-                        "verdict": verdict,
-                        "reasoning": "Auditor model returned empty evaluation response.",
-                        "supporting_evidence": "None"
-                    }
-                    audit_results.append(record)
-                    claim_copy["verification_status"] = verification_status
-                    updated_claims.append(claim_copy)
+                search_output = web_search.invoke({"query": fallback_query})
             except Exception as e:
+                search_output = f"Error during fallback web search: {str(e)}"
+            candidates = _extract_urls_from_search(search_output, exclude_url=source_url)
+
+            fallback_fetched = None
+            if candidates:
+                provenance["fallback_source_url"] = candidates[0]
+                print(f"AUDITOR -> fallback fetching: {candidates[0]}")
+                try:
+                    fallback_fetched = fetch_page.invoke({"url": candidates[0]})
+                except Exception as e:
+                    fallback_fetched = f"[FETCH STATUS: FAILED]\nURL: {candidates[0]}\nREASON: Exception during fetch ({str(e)})"
+
+            if fallback_fetched and fallback_fetched.startswith("[FETCH STATUS: SUCCESS]"):
+                # Fallback fetch succeeded -> verify against the fallback evidence.
+                provenance["fallback_fetch_status"] = "success"
+                provenance["final_evidence_source"] = "fallback_source"
+                print(f"AUDITOR -> fallback fetch succeeded: {provenance['fallback_source_url']}")
+                verdict, verification_status, reasoning, supporting_evidence = _audit_fetched_evidence(
+                    original_claim, provenance["fallback_source_url"], fallback_fetched, is_fallback=True)
+                print(f"AUDITOR -> verdict (fallback): {verdict.upper()} | verification_status: {verification_status}")
+                record = _assemble_audit_record(original_claim, source_url, evidence_type, verification_status,
+                                                verdict, reasoning, supporting_evidence, provenance)
+            else:
+                # Fallback fetch failed or no usable candidate -> UNSUPPORTED, as before.
+                provenance["fallback_fetch_status"] = "failed" if provenance["fallback_source_url"] else "no_results"
+                provenance["final_evidence_source"] = "none"
                 verdict = "unsupported"
                 verification_status = "failed"
-                print(f"AUDITOR -> verdict: UNSUPPORTED (Exception) | evidence_type: {evidence_type} | verification_status: {verification_status}")
-                record = {
-                    "original_claim": original_claim,
-                    "source_url": source_url,
-                    "evidence_type": evidence_type,
-                    "verification_status": verification_status,
-                    "verdict": verdict,
-                    "reasoning": f"Auditor evaluation error: {str(e)}",
-                    "supporting_evidence": "None"
-                }
-                audit_results.append(record)
-                claim_copy["verification_status"] = verification_status
-                updated_claims.append(claim_copy)
+                if provenance["fallback_source_url"]:
+                    reasoning = (
+                        f"Independent page fetch failed for the cited URL '{source_url}'. A fallback search "
+                        f"('{fallback_query}') was performed and an alternative source "
+                        f"('{provenance['fallback_source_url']}') was selected, but that fallback fetch also failed. "
+                        f"The original claim cannot be verified without accessible source page content."
+                    )
+                else:
+                    reasoning = (
+                        f"Independent page fetch failed for the cited URL '{source_url}'. A fallback search "
+                        f"('{fallback_query}') returned no usable alternative source to fetch. "
+                        f"The original claim cannot be verified without accessible source page content."
+                    )
+                # Keep the original [FETCH STATUS: FAILED] marker as supporting_evidence for provenance.
+                supporting_evidence = original_failure_marker
+                print(f"AUDITOR -> verdict: UNSUPPORTED (cited + fallback failed) | verification_status: {verification_status}")
+                record = _assemble_audit_record(original_claim, source_url, evidence_type, verification_status,
+                                                verdict, reasoning, supporting_evidence, provenance)
+
+        audit_results.append(record)
+        claim_copy["verification_status"] = record["verification_status"]
+        updated_claims.append(claim_copy)
 
     print("\n[VALIDATION DEBUG CHECK - EVIDENCE & AUDIT SUMMARY]:")
     for idx, (c, a) in enumerate(zip(updated_claims, audit_results), 1):
@@ -459,6 +588,9 @@ def auditor(state: State):
         print(f"    - Evidence Type: {c.get('evidence_type', 'unknown')}")
         print(f"    - Verification Status: {c.get('verification_status', 'unknown')}")
         print(f"    - Auditor Verdict: {a.get('verdict', 'unknown').upper()}")
+        print(f"    - Original Fetch: {a.get('original_fetch_status', 'unknown')} | "
+              f"Fallback: performed={a.get('fallback_search_performed', False)} "
+              f"fetch={a.get('fallback_fetch_status')} | Final Evidence: {a.get('final_evidence_source', 'unknown')}")
 
     return {"audit_results": audit_results, "claims": updated_claims}
 
