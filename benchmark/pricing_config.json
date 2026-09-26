@@ -1,15 +1,29 @@
 {
-  "_comment": "Pricing values are intentionally left null. Do not invent numbers here. Fill these in from actual billing/pricing pages before cost figures in benchmark results can be trusted. Until then, run_benchmark.py records raw token/search counts and reports cost fields as null with an 'unavailable' note.",
+  "_comment": "Pricing configured from official sources on 2026-09-26. INR values are pre-converted from published USD list prices using USD_TO_INR_RATE (compute_cost in run_benchmark.py consumes the per-1K-token and per-search INR values directly and does NOT re-apply the FX rate; the rate is stored for provenance and re-derivation). See _assumptions below.",
 
   "model": "gemini-3.5-flash-lite",
-  "GEMINI_INPUT_COST_PER_1K_TOKENS_INR": null,
-  "GEMINI_OUTPUT_COST_PER_1K_TOKENS_INR": null,
+  "GEMINI_INPUT_COST_PER_1K_TOKENS_INR": 0.0288,
+  "GEMINI_OUTPUT_COST_PER_1K_TOKENS_INR": 0.24,
 
   "search_provider": "tavily",
-  "TAVILY_COST_PER_SEARCH_INR": null,
+  "TAVILY_COST_PER_SEARCH_INR": 0.768,
 
-  "USD_TO_INR_RATE": null,
+  "USD_TO_INR_RATE": 96.0,
 
-  "pricing_last_verified": null,
-  "pricing_source_url": null
+  "pricing_last_verified": "2026-09-26",
+  "pricing_source_url": "https://ai.google.dev/gemini-api/docs/pricing ; https://docs.tavily.com/documentation/api-credits",
+
+  "_source_usd_prices": {
+    "gemini_3_5_flash_lite_input_usd_per_1M_tokens": 0.30,
+    "gemini_3_5_flash_lite_output_usd_per_1M_tokens": 2.50,
+    "tavily_basic_search_usd_per_credit": 0.008,
+    "tavily_credits_per_basic_search": 1
+  },
+
+  "_assumptions": [
+    "Gemini 3.5 Flash-Lite PAID-tier list price (text/image/video input). The free tier is $0; these figures represent paid usage.",
+    "Tavily default search_depth is 'basic' (1 credit); app/main.py calls client.search() without overriding depth, so 1 credit/search applies. Pay-as-you-go rate ($0.008/credit) is used; monthly-plan volume discounts (e.g. Growth ~$0.005/credit) would lower this.",
+    "USD_TO_INR_RATE 96.0 is an approximate spot rate as of 2026-09-26 (observed range 95.96-96.10); FX moves daily, so INR costs are indicative, not billed amounts.",
+    "search_cost in run_benchmark.py is computed over Analyst searches (num_searches) only. The Auditor's bounded fallback searches (tracked separately as auditor_fallback_* metrics) are additional Tavily calls not included in the cost figure; on the latest run this was 2 extra searches (~1.5 INR total), a minor undercount."
+  ]
 }

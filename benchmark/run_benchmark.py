@@ -572,6 +572,17 @@ def compute_summary(results: list) -> dict:
     def total(field):
         return sum(r[field] for r in successes if r.get(field) is not None)
 
+    # Cost aggregation. Per-question costs are None when pricing_config.json has no
+    # values; aggregate only over questions that produced a numeric cost, and report
+    # None (not a misleading 0) when no priced questions exist.
+    priced = [r for r in successes if r.get("total_cost_inr") is not None]
+
+    def cost_total(field):
+        return round(sum(r[field] for r in priced), 4) if priced else None
+
+    total_cost = cost_total("total_cost_inr")
+    average_cost = round(total_cost / len(priced), 4) if priced else None
+
     return {
         "total_questions": len(results),
         "successful_questions": len(successes),
@@ -597,6 +608,11 @@ def compute_summary(results: list) -> dict:
         "total_unsupported_claims": total("unsupported_claims"),
         "total_lessons_generated": total("lessons_generated"),
         "total_new_lessons_added_to_memory": total("new_lessons_added_to_memory"),
+        "total_llm_cost_inr": cost_total("llm_cost_inr"),
+        "total_search_cost_inr": cost_total("search_cost_inr"),
+        "total_cost_inr": total_cost,
+        "average_cost_per_question_inr": average_cost,
+        "priced_questions": len(priced),
     }
 
 

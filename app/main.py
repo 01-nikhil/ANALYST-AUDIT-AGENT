@@ -21,6 +21,11 @@ load_dotenv()
 # Path to lightweight local JSON memory file
 MEMORY_FILE_PATH = os.path.join(os.path.dirname(__file__), "research_memory.json")
 
+# Hard cap on the number of persistent research principles. Memory holds a small
+# curated set of durable, entity-agnostic principles; this cap keeps it from
+# growing without bound as the Feedback engine proposes new lessons.
+MEMORY_MAX_LESSONS = 8
+
 def load_memory() -> List[dict]:
     """Loads persistent research lessons from the JSON memory file."""
     if not os.path.exists(MEMORY_FILE_PATH):
@@ -52,13 +57,19 @@ def add_lessons_to_memory(new_lessons: List[dict]) -> tuple:
     duplicates = []
     for lesson_item in new_lessons:
         norm_lesson = lesson_item.get("lesson", "").strip().lower()
-        if norm_lesson and norm_lesson not in existing_lessons_normalized:
-            existing_memory.append(lesson_item)
-            existing_lessons_normalized.add(norm_lesson)
-            added.append(lesson_item)
-        else:
+        if not norm_lesson or norm_lesson in existing_lessons_normalized:
             duplicates.append(lesson_item)
-            
+            continue
+        # Hard cap: once memory is full, stop adding new principles so it cannot
+        # grow without bound. Non-duplicate lessons over the cap are treated as
+        # dropped (reported under `duplicates`, i.e. "not added").
+        if len(existing_memory) >= MEMORY_MAX_LESSONS:
+            duplicates.append(lesson_item)
+            continue
+        existing_memory.append(lesson_item)
+        existing_lessons_normalized.add(norm_lesson)
+        added.append(lesson_item)
+
     if added:
         save_memory(existing_memory)
     return added, duplicates
@@ -305,8 +316,11 @@ def chatbot(state: State):
         manifest_section = ""
 
     if memory_lessons:
+        # Inject only the concise principle text (not the long auditor "reason"
+        # field), capped to MEMORY_MAX_LESSONS, to keep the prompt small and bounded.
+        injected_lessons = memory_lessons[:MEMORY_MAX_LESSONS]
         lessons_formatted = "\n".join(
-            f"- {item['lesson']} (Reason: {item['reason']})" for item in memory_lessons
+            f"- {item.get('lesson', '')}" for item in injected_lessons if item.get("lesson")
         )
         system_content = (
             f"{BASE_SYSTEM_PROMPT}{manifest_section}\n\n"
