@@ -173,6 +173,15 @@ def count_auditor_fallback_fetches(audit_results):
     }
 
 
+def count_no_citation_claims(audit_results):
+    """Counts claims the Auditor flagged as having NO citation (the Analyst provided
+    no usable source URL). Read from the explicit provenance field 'citation_status'
+    ('present'/'missing') added by auditor(). Records that predate this flag have no
+    field and contribute 0 (backward compatible)."""
+    missing = sum(1 for a in audit_results if a.get("citation_status") == "missing")
+    return {"auditor_no_citation_claims": missing}
+
+
 def sum_usage_metadata(usage_metadata: dict):
     """UsageMetadataCallbackHandler.usage_metadata is keyed by model name.
     Sum across all models present (normally just one)."""
@@ -416,6 +425,54 @@ def summarize_timing(records: list) -> dict:
     return summary
 
 
+def serialize_message(msg):
+    """Serialize one LangChain message (or dict) into a plain JSON-able record,
+    preserving role, text content, tool calls, and tool-result linkage so the
+    Analyst plan, every tool call, and every tool result survive into the trace.
+    Uses structured fields, never str(msg)."""
+    mtype = getattr(msg, "type", None) or (msg.get("type") if isinstance(msg, dict) else None)
+    content = getattr(msg, "content", None)
+    if content is None and isinstance(msg, dict):
+        content = msg.get("content")
+    # content may be a string or a list of structured blocks
+    if isinstance(content, list):
+        text = "\n".join(
+            b.get("text", "") if isinstance(b, dict) else str(b)
+            for b in content
+        )
+    else:
+        text = content if isinstance(content, str) else ("" if content is None else str(content))
+    rec = {"role": mtype, "content": text}
+    tool_calls = getattr(msg, "tool_calls", None)
+    if tool_calls:
+        rec["tool_calls"] = [
+            {"name": tc.get("name"), "args": tc.get("args")} if isinstance(tc, dict) else str(tc)
+            for tc in tool_calls
+        ]
+    name = getattr(msg, "name", None)
+    if name:
+        rec["name"] = name  # e.g. the tool that produced a ToolMessage
+    return rec
+
+
+def build_trace(final_state, final_answer_full):
+    """Assemble the full, evaluator-readable per-question trace from graph state.
+    Contains: the Analyst message history (plan + every tool call + tool result),
+    the structured claims, the Auditor audit_results (verdicts, reasoning,
+    supporting evidence, citation_status, and fallback provenance incl. the
+    fallback search query / URL / status), the feedback lessons, and the full
+    final answer. Fallback-after-failure is captured inside audit_results'
+    provenance fields rather than the message list, since the Auditor's fallback
+    search/fetch happen outside the graph's message channel."""
+    return {
+        "analyst_messages": [serialize_message(m) for m in final_state.get("messages", [])],
+        "claims": final_state.get("claims", []),
+        "audit_results": final_state.get("audit_results", []),
+        "feedback_lessons": final_state.get("feedback_lessons", []),
+        "final_answer_full": final_answer_full,
+    }
+
+
 def run_question(question: dict, pricing: dict, pass_id: int = 1) -> dict:
     """Runs exactly one question through the real, unmodified agent and
     returns its metric record. Makes real API calls (Gemini + Tavily).
@@ -451,17 +508,22 @@ def run_question(question: dict, pricing: dict, pass_id: int = 1) -> dict:
     claim_stats = count_claim_verdicts(final_state.get("claims", []))
     auditor_stats = count_auditor_fetches(final_state.get("audit_results", []))
     auditor_fallback_stats = count_auditor_fallback_fetches(final_state.get("audit_results", []))
+    no_citation_stats = count_no_citation_claims(final_state.get("audit_results", []))
 
     feedback_lessons = final_state.get("feedback_lessons", [])
     memory_after = load_memory()
     new_lessons_added = len(memory_after) - memory_before_count
 
     final_message = final_state["messages"][-1] if final_state.get("messages") else None
-    final_answer_excerpt = ""
+    final_answer_full = ""
     if final_message is not None and getattr(final_message, "type", None) == "ai":
-        final_answer_excerpt = str(final_message.content)[:500]
+        final_answer_full = str(final_message.content)
+    final_answer_excerpt = final_answer_full[:500]
 
     cost = compute_cost(input_tokens, output_tokens, tool_stats["num_searches"], pricing)
+    # Full evaluator-readable trace (plan, tool calls, tool results, verdicts,
+    # fallback provenance, feedback, full answer) captured from graph state.
+    trace = build_trace(final_state, final_answer_full)
 
     result = {
         "pass_id": pass_id,
@@ -479,6 +541,7 @@ def run_question(question: dict, pricing: dict, pass_id: int = 1) -> dict:
         **tool_stats,
         **auditor_stats,
         **auditor_fallback_stats,
+        **no_citation_stats,
         **claim_stats,
         "lessons_generated": len(feedback_lessons),
         "new_lessons_added_to_memory": new_lessons_added,
@@ -486,6 +549,7 @@ def run_question(question: dict, pricing: dict, pass_id: int = 1) -> dict:
         "final_answer_excerpt": final_answer_excerpt,
         "timing_summary": timing_summary,
         "timing_log": timing_handler.records,
+        "trace": trace,
     }
 
     print(f"\n[BENCHMARK] Q{question['question_id']} complete in {elapsed_seconds:.2f}s "
@@ -552,6 +616,7 @@ def run_question_safe(question: dict, pricing: dict, pass_id: int = 1) -> dict:
             "auditor_fallback_fetches": None,
             "auditor_fallback_successful_fetches": None,
             "auditor_fallback_failed_fetches": None,
+            "auditor_no_citation_claims": None,
             "num_claims": None,
             "supported_claims": None,
             "contradicted_claims": None,
@@ -562,6 +627,7 @@ def run_question_safe(question: dict, pricing: dict, pass_id: int = 1) -> dict:
             "final_answer_excerpt": None,
             "timing_summary": None,
             "timing_log": [],
+            "trace": None,
         }
 
 
@@ -602,6 +668,7 @@ def compute_summary(results: list) -> dict:
         "total_auditor_fallback_fetches": total("auditor_fallback_fetches"),
         "total_auditor_fallback_successful_fetches": total("auditor_fallback_successful_fetches"),
         "total_auditor_fallback_failed_fetches": total("auditor_fallback_failed_fetches"),
+        "total_auditor_no_citation_claims": total("auditor_no_citation_claims"),
         "total_claims": total("num_claims"),
         "total_supported_claims": total("supported_claims"),
         "total_contradicted_claims": total("contradicted_claims"),

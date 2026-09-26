@@ -499,8 +499,16 @@ def auditor(state: State):
         source_url = claim_copy.get("source_url", "")
         evidence_type = claim_copy.get("evidence_type", "search_snippet")
 
+        # Explicit NO-CITATION detection: the Auditor flags any claim the Analyst
+        # left without a usable cited source. This is a reporting flag only; it does
+        # not change the supported/unsupported/contradicted verdict logic below (a
+        # missing citation still proceeds through the normal fallback path).
+        has_citation = bool(source_url and source_url.strip() and source_url != "No URL")
+        citation_status = "present" if has_citation else "missing"
+
         provenance = {
             "original_source_url": source_url,
+            "citation_status": citation_status,
             "original_fetch_status": None,
             "fallback_search_performed": False,
             "fallback_search_query": None,
@@ -509,6 +517,8 @@ def auditor(state: State):
             "final_evidence_source": "none",
         }
 
+        if not has_citation:
+            print("AUDITOR -> NO CITATION: Analyst provided no cited source for this claim.")
         print(f"\nAUDITOR -> fetching {source_url if source_url else '<No URL>'}")
 
         # 1. Try the Analyst's cited source page first.
@@ -602,6 +612,7 @@ def auditor(state: State):
         print(f"    - Evidence Type: {c.get('evidence_type', 'unknown')}")
         print(f"    - Verification Status: {c.get('verification_status', 'unknown')}")
         print(f"    - Auditor Verdict: {a.get('verdict', 'unknown').upper()}")
+        print(f"    - Citation: {a.get('citation_status', 'unknown').upper()}")
         print(f"    - Original Fetch: {a.get('original_fetch_status', 'unknown')} | "
               f"Fallback: performed={a.get('fallback_search_performed', False)} "
               f"fetch={a.get('fallback_fetch_status')} | Final Evidence: {a.get('final_evidence_source', 'unknown')}")

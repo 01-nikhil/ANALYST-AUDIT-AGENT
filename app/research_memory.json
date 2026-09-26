@@ -28,5 +28,15 @@
     "lesson": "Prefer authoritative primary sources, but when a primary source is inaccessible, fall back to a reputable secondary source and label evidence by how it was actually obtained (search snippet, fetched page, or auditor-verified).",
     "reason": "Curated durable principle. Resolves the tension between authoritative-but-blocked and accessible-but-secondary sources without overstating verification.",
     "source_of_feedback": "curated"
+  },
+  {
+    "lesson": "Verify multi-part temporal claims by checking specific year-by-year funding milestones rather than relying solely on aggregate investment totals.",
+    "reason": "The analyst claim required identifying both the investment amount and the specific year(s) of investment, but the audit noted the fetched source only confirmed the total amount without explicitly detailing the full timeline of the investments.",
+    "source_of_feedback": "auditor"
+  },
+  {
+    "lesson": "When answering comparative financial claims involving multiple companies, ensure that data for all entities is gathered and verified within the same research context before making a conclusion.",
+    "reason": "The analyst gathered Microsoft's revenue in one source and Alphabet's in another, but failed to synthesize or verify them together, leading to unsupported comparative verdicts.",
+    "source_of_feedback": "auditor"
   }
 ]

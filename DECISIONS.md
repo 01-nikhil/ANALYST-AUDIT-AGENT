@@ -71,3 +71,53 @@ validated and memory compressed, further live passes would mostly re-measure
 nondeterministic web-search variance at real API cost without testing anything
 new; deterministic fixture tests already cover the branch logic. So we froze the
 architecture at Pass 4 and moved to finalization.
+
+## Rejected / replaced alternatives
+- **Prompt-only evidence labelling** (ask the LLM to state its own confidence):
+  measured in early Phase 6.1 and rejected — the model mislabelled search
+  snippets as "fetched/verified". Replaced by deterministic status→label mapping
+  in `compose_final_answer` (decision 8).
+- **Unbounded append-only memory with exact-string dedup**: measured across
+  Passes 1–4; it grew to 34 near-duplicate lessons and inflated the prompt.
+  Replaced by 6 curated principles + 8-lesson cap (decision 6).
+- **Single-fetch Auditor** (no fallback): rejected after Q4/Q8 in Passes 1–3
+  showed one blocked URL killing verification. Replaced by the bounded fallback
+  (decision 7).
+- **Vector/embedding memory**: rejected as over-engineered for a hackathon; a
+  small JSON principle set is enough and adds no dependency.
+
+## Trade-offs under the time limit
+- Benchmark runs are single-trial per pass (n=1); live-search nondeterminism is
+  not averaged out, so we report trends cautiously and lean on deterministic
+  fixture tests for correctness.
+- The fallback tries **one** neutral search + top result, not an exhaustive
+  multi-source sweep — cheaper and bounded, at the cost of occasionally missing a
+  usable source deeper in the results.
+- Cost is computed post-hoc from token/search counts (list prices + indicative
+  FX), not from real billing.
+
+## Testing
+Seven offline fixture suites (no API cost) cover: original vs. fallback fetch
+counting, the fallback control-flow (success / both-fail / unrelated→unsupported /
+snippet-never-verified), NO-CITATION flagging, memory dedup+cap, cost math, and
+callback timing attribution. A `--dry-run` validates graph structure and config.
+Full live behaviour was exercised across Passes 1–4 (results under
+`benchmark/results/`).
+
+## Where it breaks (known weaknesses + Auditor limitations)
+- **Full per-question trace is not persisted** to the result JSON (only metrics,
+  a 500-char answer excerpt, and per-op timing). The rich trace exists only in
+  run-time stdout. This is the biggest evaluation-readiness gap.
+- **No explicit Analyst "plan" step** and no explicit single-source cross-check
+  instruction; the ReAct loop reasons implicitly and the Auditor's independent
+  re-fetch is the de-facto second check.
+- Auditor verdict quality depends on the LLM judging one fetched page; a
+  correct-but-shallow page can yield `unsupported`. Fallback fetches are not
+  added to the Tavily cost figure. n=1 benchmarking limits accuracy claims.
+
+## With two more weeks
+Persist the full per-question trace (plan, every tool call + result, fallback,
+verdicts+reasoning, feedback, full answer) to a human-readable artifact; add an
+explicit Analyst planning node and single-source cross-check; run each question
+N≥3× to separate real learning from search noise; broaden the fallback to a small
+multi-source sweep; and fold Auditor fallback searches into the cost model.
